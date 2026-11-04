@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Release signing key lives outside the repo: ~/.config/notif-blocker/keystore.properties
+// (storeFile, storePassword, keyAlias, keyPassword). Without it the build falls back to the debug key.
+def keyProps = new Properties()
+def keyFile = new File(System.getProperty('user.home'), '.config/notif-blocker/keystore.properties')
+if (keyFile.exists()) keyFile.withInputStream { keyProps.load(it) }
+
+android {
+    namespace = 'com.eason.notifblocker'
+    compileSdk = 36
+    defaultConfig {
+        applicationId 'com.eason.notifblocker'
+        minSdk 33
+        targetSdk 36
+        // scripts/release.sh passes a build-time-increasing code so a newer APK is always an update.
+        versionCode = (project.findProperty('nb.versionCode') ?: '1').toString().toInteger()
+        versionName = (project.findProperty('nb.versionName') ?: '1.0.dev').toString()
+    }
+    signingConfigs {
+        release {
+            if (keyProps.getProperty('storeFile')) {
+                storeFile file(keyProps.getProperty('storeFile'))
+                storePassword keyProps.getProperty('storePassword')
+                keyAlias keyProps.getProperty('keyAlias')
+                keyPassword keyProps.getProperty('keyPassword')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig keyProps.getProperty('storeFile') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+}
