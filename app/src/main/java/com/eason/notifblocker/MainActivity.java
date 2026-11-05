@@ -28,9 +28,21 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.List;
 
-/** One screen: setup status, block rules, recently seen notifications, and the updater. */
+/** Three tabs: recent notifications, block rules, and settings (setup status and the updater). */
 public class MainActivity extends Activity {
+    private enum Tab {
+        RECENT("Recent"), RULES("Rules"), SETTINGS("Settings");
+
+        final String label;
+
+        Tab(String label) {
+            this.label = label;
+        }
+    }
+
     private LinearLayout root;
+    private LinearLayout tabBar;
+    private Tab tab = Tab.RECENT;
     private Update available;
     private File downloaded;
     private String updateStatus = "";
@@ -41,18 +53,34 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        if (state != null) {
+            int saved = state.getInt("tab", 0);
+            if (saved >= 0 && saved < Tab.values().length) tab = Tab.values()[saved];
+        }
+        LinearLayout frame = new LinearLayout(this);
+        frame.setOrientation(LinearLayout.VERTICAL);
         ScrollView scroll = new ScrollView(this);
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(16), dp(8), dp(16), dp(16));
         scroll.addView(root);
-        scroll.setOnApplyWindowInsetsListener((view, insets) -> {
-            int pad = dp(16);
-            view.setPadding(pad + insets.getSystemWindowInsetLeft(), pad + insets.getSystemWindowInsetTop(),
-                pad + insets.getSystemWindowInsetRight(), pad + insets.getSystemWindowInsetBottom());
+        frame.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        tabBar = new LinearLayout(this);
+        tabBar.setOrientation(LinearLayout.HORIZONTAL);
+        frame.addView(tabBar, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        frame.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets;
         });
-        setContentView(scroll);
+        setContentView(frame);
         checkForUpdate(false);
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putInt("tab", tab.ordinal());
     }
 
     @Override
@@ -76,33 +104,76 @@ public class MainActivity extends Activity {
 
     private void render() {
         root.removeAllViews();
-        title("Notification Blocker");
-        body("Dismisses notifications that match a rule below, as soon as they appear.");
-
-        // Setup
-        section("Setup");
         boolean enabled = listenerEnabled();
-        body(enabled ? "\u2705 Notification access is on" + (BlockerService.connected ? "" : " (starting\u2026)")
-            : "\u274c Notification access is off. Turn it on for this app.");
-        button(enabled ? "Notification access settings" : "Turn on notification access",
-            () -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
-        if (!enabled) {
-            body("If the switch is greyed out (sideloaded app), open App info, tap \u22ee and choose \u201cAllow restricted settings\u201d, then try again.");
-            button("Open App info", () -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                Uri.parse("package:" + getPackageName()))));
+        boolean batteryOk = getSystemService(PowerManager.class).isIgnoringBatteryOptimizations(getPackageName());
+        renderTabBar(!enabled || !batteryOk || available != null);
+        switch (tab) {
+            case RULES: renderRules(); break;
+            case SETTINGS: renderSettings(enabled, batteryOk); break;
+            default: renderRecent(enabled);
         }
-        PowerManager power = getSystemService(PowerManager.class);
-        if (!power.isIgnoringBatteryOptimizations(getPackageName())) {
-            body("\u26a0\ufe0f Battery optimization may stop the blocker in the background.");
-            button("Allow unrestricted battery use", () -> startActivity(new Intent(
-                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
-        } else {
-            body("\u2705 Battery use is unrestricted");
-        }
-        body("Blocked so far: " + Store.blockedCount(this));
+    }
 
-        // Rules
-        section("Rules");
+    private void renderTabBar(boolean attention) {
+        tabBar.removeAllViews();
+        tabBar.setBackground(rounded(0x14888888, 0, 0));
+        for (Tab option : Tab.values()) {
+            boolean selected = option == tab;
+            TextView item = new TextView(this);
+            item.setText(option.label + (option == Tab.SETTINGS && attention ? " \u25cf" : ""));
+            item.setGravity(Gravity.CENTER);
+            item.setTextSize(15);
+            item.setTypeface(selected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            item.setPadding(0, dp(16), 0, dp(16));
+            item.setTextColor(selected ? 0xFF1A73E8 : chipTextColor());
+            item.setAlpha(selected ? 1f : 0.75f);
+            item.setOnClickListener(v -> {
+                tab = option;
+                render();
+            });
+            tabBar.addView(item, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        }
+    }
+
+    private void renderRecent(boolean enabled) {
+        title("Recent");
+        if (!enabled) {
+            LinearLayout banner = new LinearLayout(this);
+            banner.setOrientation(LinearLayout.VERTICAL);
+            banner.setPadding(dp(12), dp(10), dp(12), dp(10));
+            banner.setBackground(rounded(0x26C26401, dp(12), 0));
+            TextView text = new TextView(this);
+            text.setText("\u274c Notification access is off, so nothing is blocked. Tap to fix it in Settings.");
+            banner.addView(text);
+            banner.setOnClickListener(v -> {
+                tab = Tab.SETTINGS;
+                render();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.bottomMargin = dp(8);
+            root.addView(banner, params);
+        }
+        body("Tap a notification to block it. Not swipeable ones may resist; the result shows after a block.");
+        List<Seen> seen = Store.seen(this);
+        if (seen.isEmpty()) {
+            body(enabled ? "Nothing seen yet." : "Nothing to show until notification access is on.");
+            return;
+        }
+        root.addView(filterBar());
+        int shown = 0;
+        for (Seen entry : seen) {
+            if (!filter.accepts(entry)) continue;
+            shown++;
+            root.addView(card(entry));
+        }
+        if (shown == 0) body("No " + filter.label.toLowerCase(java.util.Locale.ROOT) + " notifications.");
+        button("Clear list", () -> Store.clearSeen(this));
+    }
+
+    private void renderRules() {
+        title("Rules");
+        body("Notifications that match an enabled rule are dismissed as soon as they appear.");
+        body("Blocked so far: " + Store.blockedCount(this));
         List<Rule> rules = Store.rules(this);
         if (rules.isEmpty()) body("No rules yet.");
         for (int i = 0; i < rules.size(); i++) {
@@ -124,23 +195,29 @@ public class MainActivity extends Activity {
             root.addView(row);
         }
         button("Add rule", this::addRuleDialog);
+        body("Tip: add a rule faster by tapping a notification on the Recent tab.");
+    }
 
-        // Recently seen
-        section("Recent notifications");
-        body("Tap one to block it. \u201cnot swipeable\u201d ones may resist; the result is shown after a block.");
-        List<Seen> seen = Store.seen(this);
-        if (seen.isEmpty()) body(enabled ? "Nothing seen yet." : "Turn on notification access to see them.");
-        else root.addView(filterBar());
-        int shown = 0;
-        for (Seen entry : seen) {
-            if (!filter.accepts(entry)) continue;
-            shown++;
-            root.addView(card(entry));
+    private void renderSettings(boolean enabled, boolean batteryOk) {
+        title("Settings");
+        section("Setup");
+        body(enabled ? "\u2705 Notification access is on" + (BlockerService.connected ? "" : " (starting\u2026)")
+            : "\u274c Notification access is off. Turn it on for this app.");
+        button(enabled ? "Notification access settings" : "Turn on notification access",
+            () -> startActivity(new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)));
+        if (!enabled) {
+            body("If the switch is greyed out (sideloaded app), open App info, tap \u22ee and choose \u201cAllow restricted settings\u201d, then try again.");
+            button("Open App info", () -> startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName()))));
         }
-        if (!seen.isEmpty() && shown == 0) body("No " + filter.label.toLowerCase(java.util.Locale.ROOT) + " notifications.");
-        if (!seen.isEmpty()) button("Clear list", () -> Store.clearSeen(this));
+        if (!batteryOk) {
+            body("\u26a0\ufe0f Battery optimization may stop the blocker in the background.");
+            button("Allow unrestricted battery use", () -> startActivity(new Intent(
+                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))));
+        } else {
+            body("\u2705 Battery use is unrestricted");
+        }
 
-        // Updates
         section("Updates");
         body("Version " + versionName() + " (" + versionCode() + ")");
         if (!updateStatus.isEmpty()) body(updateStatus);
@@ -382,7 +459,7 @@ public class MainActivity extends Activity {
         view.setText(text);
         view.setTextSize(18);
         view.setTypeface(Typeface.DEFAULT_BOLD);
-        view.setPadding(0, dp(24), 0, dp(4));
+        view.setPadding(0, dp(16), 0, dp(4));
         root.addView(view);
     }
 

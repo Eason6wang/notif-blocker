@@ -7,9 +7,9 @@ System notifications that are marked non-swipeable may resist; the app shows the
 
 ## Install and set up
 1. Download `notif-blocker.apk` from the latest release and install it.
-2. Open the app, tap **Turn on notification access**. If the switch is greyed out: App info > ⋮ > **Allow restricted settings**.
-3. Tap **Allow unrestricted battery use** so Samsung does not stop it.
-4. Default rules: title contains `voicemail` or `charging`. Tap any card under **Recent notifications** to block it; the chips above the list filter by All, Blocked or Not swipeable.
+2. Open the app, go to the **Settings** tab and tap **Turn on notification access**. If the switch is greyed out: App info > ⋮ > **Allow restricted settings**.
+3. On the Settings tab, tap **Allow unrestricted battery use** so Samsung does not stop it.
+4. Default rules: title contains `voicemail` or `charging`. Tap any card on the **Recent** tab to block it; the chips above the list filter by All, Blocked or Not swipeable.
 
 ## Updates
 **Check for updates** reads the latest GitHub release (`update.json` + `notif-blocker.apk`), verifies the SHA-256 and
