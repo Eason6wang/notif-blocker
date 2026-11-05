@@ -36,6 +36,29 @@ final class Seen {
         return pkg.equals(otherPkg) && title.equals(otherTitle);
     }
 
+    boolean blocked() {
+        return result.length() > 0;
+    }
+
+    /** Filters shown above the Recent list. */
+    enum Filter {
+        ALL("All"), BLOCKED("Blocked"), NOT_SWIPEABLE("Not swipeable");
+
+        final String label;
+
+        Filter(String label) {
+            this.label = label;
+        }
+
+        boolean accepts(Seen entry) {
+            switch (this) {
+                case BLOCKED: return entry.blocked();
+                case NOT_SWIPEABLE: return !entry.clearable;
+                default: return true;
+            }
+        }
+    }
+
     String flags() {
         StringBuilder out = new StringBuilder();
         if (ongoing) out.append("ongoing");

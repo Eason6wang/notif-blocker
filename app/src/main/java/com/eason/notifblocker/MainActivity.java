@@ -6,7 +6,9 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
+import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.PowerManager;
@@ -33,6 +35,7 @@ public class MainActivity extends Activity {
     private File downloaded;
     private String updateStatus = "";
     private boolean busy;
+    private Seen.Filter filter = Seen.Filter.ALL;
     private final SharedPreferences.OnSharedPreferenceChangeListener listener = (prefs, key) -> runOnUiThread(this::render);
 
     @Override
@@ -127,23 +130,14 @@ public class MainActivity extends Activity {
         body("Tap one to block it. \u201cnot swipeable\u201d ones may resist; the result is shown after a block.");
         List<Seen> seen = Store.seen(this);
         if (seen.isEmpty()) body(enabled ? "Nothing seen yet." : "Turn on notification access to see them.");
+        else root.addView(filterBar());
+        int shown = 0;
         for (Seen entry : seen) {
-            LinearLayout item = new LinearLayout(this);
-            item.setOrientation(LinearLayout.VERTICAL);
-            item.setPadding(0, dp(8), 0, dp(8));
-            TextView name = new TextView(this);
-            name.setText(entry.title.isEmpty() ? "(no title)" : entry.title);
-            name.setTypeface(Typeface.DEFAULT_BOLD);
-            name.setTextSize(16);
-            item.addView(name);
-            TextView meta = new TextView(this);
-            String flags = entry.flags();
-            meta.setText(entry.label + " \u00b7 " + DateUtils.getRelativeTimeSpanString(entry.time) + (flags.isEmpty() ? "" : "\n" + flags));
-            meta.setAlpha(0.7f);
-            item.addView(meta);
-            item.setOnClickListener(v -> seenDialog(entry));
-            root.addView(item);
+            if (!filter.accepts(entry)) continue;
+            shown++;
+            root.addView(card(entry));
         }
+        if (!seen.isEmpty() && shown == 0) body("No " + filter.label.toLowerCase(java.util.Locale.ROOT) + " notifications.");
         if (!seen.isEmpty()) button("Clear list", () -> Store.clearSeen(this));
 
         // Updates
@@ -266,6 +260,109 @@ public class MainActivity extends Activity {
         } catch (Exception error) {
             return "?";
         }
+    }
+
+    private LinearLayout filterBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(0, dp(4), 0, dp(8));
+        for (Seen.Filter option : Seen.Filter.values()) {
+            boolean selected = option == filter;
+            TextView chip = new TextView(this);
+            chip.setText(option.label);
+            chip.setTextSize(14);
+            chip.setPadding(dp(14), dp(6), dp(14), dp(6));
+            chip.setTextColor(selected ? Color.WHITE : chipTextColor());
+            chip.setBackground(rounded(selected ? 0xFF1A73E8 : Color.TRANSPARENT, dp(16), selected ? 0 : 0x66888888));
+            chip.setOnClickListener(v -> {
+                filter = option;
+                render();
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            params.rightMargin = dp(6);
+            bar.addView(chip, params);
+        }
+        return bar;
+    }
+
+    /** One notification: app and time on top, then title, message text and status tags. */
+    private LinearLayout card(Seen entry) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.setBackground(rounded(Color.TRANSPARENT, dp(12), 0x55888888));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(8);
+        card.setLayoutParams(params);
+
+        LinearLayout top = new LinearLayout(this);
+        TextView app = new TextView(this);
+        app.setText(entry.label.toUpperCase(java.util.Locale.ROOT));
+        app.setTextSize(12);
+        app.setAlpha(0.65f);
+        app.setSingleLine(true);
+        app.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        top.addView(app, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView time = new TextView(this);
+        time.setText(DateUtils.getRelativeTimeSpanString(entry.time));
+        time.setTextSize(12);
+        time.setAlpha(0.65f);
+        top.addView(time);
+        card.addView(top);
+
+        TextView name = new TextView(this);
+        name.setText(entry.title.isEmpty() ? "(no title)" : entry.title);
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTextSize(16);
+        name.setPadding(0, dp(2), 0, 0);
+        card.addView(name);
+
+        if (!entry.text.isEmpty()) {
+            TextView text = new TextView(this);
+            text.setText(entry.text);
+            text.setTextSize(14);
+            text.setAlpha(0.8f);
+            text.setMaxLines(2);
+            text.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            card.addView(text);
+        }
+
+        LinearLayout tags = new LinearLayout(this);
+        tags.setPadding(0, dp(6), 0, 0);
+        if (entry.blocked()) tags.addView(tag("Blocked: " + entry.result, 0xFF188038));
+        if (entry.ongoing) tags.addView(tag("Ongoing", 0xFF5F6368));
+        if (!entry.clearable) tags.addView(tag("Not swipeable", 0xFFC26401));
+        if (tags.getChildCount() > 0) card.addView(tags);
+
+        card.setOnClickListener(v -> seenDialog(entry));
+        return card;
+    }
+
+    private TextView tag(String text, int color) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextSize(11);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextColor(color);
+        view.setPadding(dp(8), dp(2), dp(8), dp(2));
+        view.setBackground(rounded((color & 0x00FFFFFF) | 0x26000000, dp(6), 0));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.rightMargin = dp(6);
+        view.setLayoutParams(params);
+        return view;
+    }
+
+    private GradientDrawable rounded(int fill, int radius, int stroke) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(fill);
+        drawable.setCornerRadius(radius);
+        if (stroke != 0) drawable.setStroke(Math.max(1, dp(1)), stroke);
+        return drawable;
+    }
+
+    private int chipTextColor() {
+        TextView probe = new TextView(this);
+        return probe.getCurrentTextColor();
     }
 
     private int dp(int value) {
