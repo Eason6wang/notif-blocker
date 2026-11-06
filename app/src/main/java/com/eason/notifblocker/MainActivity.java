@@ -172,30 +172,113 @@ public class MainActivity extends Activity {
 
     private void renderRules() {
         title("Rules");
-        body("Notifications that match an enabled rule are dismissed as soon as they appear.");
-        body("Blocked so far: " + Store.blockedCount(this));
+        body("A notification that matches an enabled rule is dismissed as soon as it appears.");
+
+        LinearLayout stat = new LinearLayout(this);
+        stat.setOrientation(LinearLayout.HORIZONTAL);
+        stat.setGravity(Gravity.CENTER_VERTICAL);
+        stat.setPadding(dp(16), dp(12), dp(16), dp(12));
+        stat.setBackground(rounded(0x1F1A73E8, dp(12), 0));
+        TextView count = new TextView(this);
+        count.setText(String.valueOf(Store.blockedCount(this)));
+        count.setTextSize(28);
+        count.setTypeface(Typeface.DEFAULT_BOLD);
+        count.setTextColor(0xFF1A73E8);
+        stat.addView(count);
+        TextView label = new TextView(this);
+        label.setText("notifications blocked so far");
+        label.setTextSize(14);
+        label.setTextColor(textPrimary());
+        label.setPadding(dp(12), 0, 0, 0);
+        stat.addView(label);
+        LinearLayout.LayoutParams statParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        statParams.topMargin = dp(8);
+        statParams.bottomMargin = dp(12);
+        root.addView(stat, statParams);
+
         List<Rule> rules = Store.rules(this);
-        if (rules.isEmpty()) body("No rules yet.");
-        for (int i = 0; i < rules.size(); i++) {
-            final int index = i;
-            Rule rule = rules.get(i);
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            Switch toggle = new Switch(this);
-            toggle.setChecked(rule.enabled);
-            toggle.setText(rule.describe());
-            toggle.setOnCheckedChangeListener((button, checked) -> Store.setEnabled(this, index, checked));
-            row.addView(toggle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-            Button remove = new Button(this);
-            remove.setText("Remove");
-            remove.setAllCaps(false);
-            remove.setOnClickListener(v -> Store.removeRule(this, index));
-            row.addView(remove);
-            root.addView(row);
+        if (rules.isEmpty()) body("No rules yet. Add one below, or tap a notification on the Recent tab.");
+        for (int i = 0; i < rules.size(); i++) root.addView(ruleCard(i, rules.get(i)));
+        root.addView(primaryButton("+ Add rule", this::addRuleDialog));
+        body("Tip: tapping a notification on the Recent tab adds a rule faster.");
+    }
+
+    /** One rule: what it matches, where, an on/off switch and a small remove link. */
+    private LinearLayout ruleCard(int index, Rule rule) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(14), dp(10), dp(8), dp(6));
+        card.setBackground(rounded(Color.TRANSPARENT, dp(12), 0x55888888));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.bottomMargin = dp(8);
+        card.setLayoutParams(params);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout text = new LinearLayout(this);
+        text.setOrientation(LinearLayout.VERTICAL);
+        TextView what = new TextView(this);
+        what.setText(rule.title.isEmpty() ? "Any notification" : "\u201c" + rule.title + "\u201d");
+        what.setTextSize(17);
+        what.setTypeface(Typeface.DEFAULT_BOLD);
+        what.setTextColor(textPrimary());
+        text.addView(what);
+        TextView where = new TextView(this);
+        where.setText((rule.title.isEmpty() ? "From " : "In title \u00b7 ") + (rule.pkg.isEmpty() ? "any app" : appName(rule.pkg)));
+        where.setTextSize(13);
+        where.setAlpha(0.65f);
+        text.addView(where);
+        top.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Switch toggle = new Switch(this);
+        toggle.setChecked(rule.enabled);
+        toggle.setOnCheckedChangeListener((button, checked) -> Store.setEnabled(this, index, checked));
+        top.addView(toggle);
+        card.addView(top);
+
+        TextView remove = new TextView(this);
+        remove.setText("Remove");
+        remove.setTextSize(13);
+        remove.setTextColor(0xFFD93025);
+        remove.setPadding(dp(8), dp(8), dp(8), dp(6));
+        remove.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("Remove this rule?")
+            .setMessage(rule.describe())
+            .setPositiveButton("Remove", (d, w) -> Store.removeRule(this, index))
+            .setNegativeButton("Cancel", null).show());
+        LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        removeParams.gravity = Gravity.END;
+        card.addView(remove, removeParams);
+        card.setAlpha(rule.enabled ? 1f : 0.55f);
+        return card;
+    }
+
+    private String appName(String pkg) {
+        for (Seen entry : Store.seen(this)) if (entry.pkg.equals(pkg) && !entry.label.isEmpty()) return entry.label;
+        try {
+            return String.valueOf(getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0)));
+        } catch (Exception error) {
+            return pkg;
         }
-        button("Add rule", this::addRuleDialog);
-        body("Tip: add a rule faster by tapping a notification on the Recent tab.");
+    }
+
+    private Button primaryButton(String text, Runnable action) {
+        Button view = new Button(this);
+        view.setText(text);
+        view.setAllCaps(false);
+        view.setTextSize(16);
+        view.setTextColor(Color.WHITE);
+        view.setStateListAnimator(null);
+        view.setBackground(rounded(0xFF1A73E8, dp(24), 0));
+        view.setOnClickListener(v -> action.run());
+        return view;
+    }
+
+    private int textPrimary() {
+        android.content.res.TypedArray attrs = obtainStyledAttributes(new int[] {android.R.attr.textColorPrimary});
+        try {
+            return attrs.getColor(0, Color.BLACK);
+        } finally {
+            attrs.recycle();
+        }
     }
 
     private void renderSettings(boolean enabled, boolean batteryOk) {
@@ -451,6 +534,7 @@ public class MainActivity extends Activity {
         view.setText(text);
         view.setTextSize(26);
         view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextColor(textPrimary());
         root.addView(view);
     }
 
@@ -459,6 +543,7 @@ public class MainActivity extends Activity {
         view.setText(text);
         view.setTextSize(18);
         view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextColor(textPrimary());
         view.setPadding(0, dp(16), 0, dp(4));
         root.addView(view);
     }
